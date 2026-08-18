@@ -1,66 +1,17 @@
 from __future__ import annotations
-
-import argparse
-import json
-from collections import Counter
+import argparse,json
+from datetime import date
 from pathlib import Path
-
-FIELDS = [
-    "student_code",
-    "event",
-    "due_on",
-    "status"
-]
-STATUSES = [
-    "sent",
-    "received",
-    "reminder_needed"
-]
-RECORD_NAME = "согласие"
-
-def load_records(store: Path) -> list[dict[str, str]]:
-    if not store.exists():
-        return []
-    content = json.loads(store.read_text(encoding="utf-8"))
-    if not isinstance(content, list):
-        raise ValueError("Файл хранилища должен содержать JSON-массив")
-    return content
-
-def save_records(store: Path, records: list[dict[str, str]]) -> None:
-    store.parent.mkdir(parents=True, exist_ok=True)
-    store.write_text(json.dumps(records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-def add_record(store: Path, payload: dict[str, str]) -> dict[str, str]:
-    missing = [field for field in FIELDS if not str(payload.get(field, "")).strip()]
-    if missing:
-        raise ValueError("Не заполнены поля: " + ", ".join(missing))
-    if payload["status"] not in STATUSES:
-        raise ValueError("Недопустимый статус: " + payload["status"])
-    record = {field: str(payload[field]).strip() for field in FIELDS}
-    records = load_records(store)
-    records.append(record)
-    save_records(store, records)
-    return record
-
-def build_report(store: Path) -> dict[str, object]:
-    records = load_records(store)
-    statuses = Counter(record["status"] for record in records)
-    return {"record_name": RECORD_NAME, "total": len(records), "by_status": dict(sorted(statuses.items()))}
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=f"Локальный реестр: {RECORD_NAME}")
-    parser.add_argument("--store", type=Path, default=Path("data/records.json"))
-    commands = parser.add_subparsers(dest="command", required=True)
-    add = commands.add_parser("add", help="Добавить запись")
-    for field in FIELDS:
-        add.add_argument(f"--{field.replace('_', '-')}", dest=field, required=True)
-    commands.add_parser("report", help="Показать сводку")
-    args = parser.parse_args()
-    if args.command == "add":
-        record = add_record(args.store, {field: getattr(args, field) for field in FIELDS})
-        print(json.dumps(record, ensure_ascii=False))
-    else:
-        print(json.dumps(build_report(args.store), ensure_ascii=False, indent=2))
-
-if __name__ == "__main__":
-    main()
+def load(store): return json.loads(store.read_text(encoding="utf-8")) if store.exists() else []
+def save(store,rows): store.parent.mkdir(parents=True,exist_ok=True); store.write_text(json.dumps(rows,ensure_ascii=False,indent=2),encoding="utf-8")
+def add(store,student_code,event,due_on): date.fromisoformat(due_on); rows=load(store); item={"student_code":student_code,"event":event,"due_on":due_on,"status":"sent"}; rows.append(item); save(store,rows); return item
+def reminders(store,today):
+ now=date.fromisoformat(today); return [r for r in load(store) if r["status"]=="sent" and date.fromisoformat(r["due_on"])<=now]
+def receive(store,student_code,event):
+ rows=load(store)
+ for r in rows:
+  if r["student_code"]==student_code and r["event"]==event: r["status"]="received"; save(store,rows); return r
+ raise ValueError("Согласие не найдено")
+def main():
+ p=argparse.ArgumentParser(); p.add_argument("--store",type=Path,default=Path("data/slips.json")); s=p.add_subparsers(dest="cmd",required=True); a=s.add_parser("add"); [a.add_argument(k,required=True) for k in ("--student-code","--event","--due-on")]; r=s.add_parser("reminders"); r.add_argument("--today",required=True); k=s.add_parser("receive"); k.add_argument("--student-code",required=True); k.add_argument("--event",required=True); x=p.parse_args(); result=add(x.store,x.student_code,x.event,x.due_on) if x.cmd=="add" else reminders(x.store,x.today) if x.cmd=="reminders" else receive(x.store,x.student_code,x.event); print(json.dumps(result,ensure_ascii=False,indent=2))
+if __name__=="__main__": main()
